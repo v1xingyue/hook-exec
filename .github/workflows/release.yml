@@ -36,8 +36,11 @@ jobs:
       - name: Build
         run: |
           make all
-          # 创建发布包
           VERSION=${{ github.event.inputs.version || github.ref_name }}
+          # 复制并重命名 so 文件
+          cp build/hook_execve.so.x86_64 hook_execve.${VERSION}.x86_64.so
+          cp build/hook_execve.so.aarch64 hook_execve.${VERSION}.aarch64.so
+          # 创建完整包
           tar czf hook_package_${VERSION}.tar.gz build/
 
       - name: Generate Release Notes
@@ -45,9 +48,12 @@ jobs:
           VERSION=${{ github.event.inputs.version || github.ref_name }}
           echo "## Hook Library ${VERSION}" > release_notes.md
           echo "" >> release_notes.md
-          echo "包含以下文件：" >> release_notes.md
-          echo "- hook_execve.so.x86_64 (适用于 x86_64 架构，GLIBC >= 2.17)" >> release_notes.md
-          echo "- hook_execve.so.aarch64 (适用于 ARM64 架构，GLIBC >= 2.17)" >> release_notes.md
+          echo "### 单独的 SO 文件：" >> release_notes.md
+          echo "- hook_execve.${VERSION}.x86_64.so (x86_64 架构，GLIBC >= 2.17)" >> release_notes.md
+          echo "- hook_execve.${VERSION}.aarch64.so (ARM64 架构，GLIBC >= 2.17)" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### 完整包：" >> release_notes.md
+          echo "- hook_package_${VERSION}.tar.gz (包含所有文件)" >> release_notes.md
 
       - name: Create Release
         id: create_release
@@ -55,6 +61,8 @@ jobs:
         with:
           files: |
             hook_package_*.tar.gz
+            hook_execve.*.x86_64.so
+            hook_execve.*.aarch64.so
           body_path: release_notes.md
           draft: false
           prerelease: ${{ github.event.inputs.prerelease || false }}
