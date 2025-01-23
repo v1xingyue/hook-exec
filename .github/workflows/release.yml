@@ -18,9 +18,8 @@ on:
 
 # 添加权限配置
 permissions:
-  contents: write
+  contents: write # 这个权限足够处理 releases 了
   packages: write
-  releases: write
 
 jobs:
   build:
