@@ -38,3 +38,8 @@ clean:
 	rm -f *.o
 
 .PHONY: all clean $(PLATFORMS) 
+
+install:
+	@cp $(BUILD_DIR)/$(TARGET).x86_64 /usr/lib/$(TARGET)
+	@echo "install $(TARGET) to /usr/lib/$(TARGET)"
+	@echo " LD_PRELOAD=/usr/lib/$(TARGET) /bin/bash "
