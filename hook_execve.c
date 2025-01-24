@@ -11,9 +11,8 @@
 #include <netdb.h>
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <stdarg.h>       // 用于 va_list, va_start, va_arg, va_end
-#include <limits.h>       // 用于 PATH_MAX
-#include <linux/limits.h> // 备用的 PATH_MAX 定义
+#include <stdarg.h> // 用于 va_list, va_start, va_arg, va_end
+#include <limits.h> // 用于 PATH_MAX
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
