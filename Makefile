@@ -15,12 +15,6 @@ BUILD_DIR=build
 SRCS = hook_execve.c audit_log.c
 OBJS = $(SRCS:.c=.o)
 
-all: $(PLATFORMS)
-
-# 创建构建目录
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
-
 # x86_64 最低 GLIBC 2.17
 x86_64-glibc-2.17: $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $(SRCS)
@@ -32,6 +26,12 @@ aarch64-glibc-2.17: $(BUILD_DIR)
 	aarch64-linux-gnu-gcc $(CFLAGS) -c $(SRCS)
 	aarch64-linux-gnu-gcc $(CFLAGS) $(OBJS) -o $(BUILD_DIR)/$(TARGET).aarch64 $(LDFLAGS)
 	rm -f *.o
+
+all: $(PLATFORMS)
+
+# 创建构建目录
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
 clean:
 	rm -rf $(BUILD_DIR)
