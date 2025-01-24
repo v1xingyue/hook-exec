@@ -5,6 +5,18 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <sys/socket.h>
+
+// 全局配置结构体
+typedef struct
+{
+    char log_dir[256]; // 审计日志目录
+} audit_config_t;
+
+extern audit_config_t g_audit_config;
+
+// 初始化审计日志配置
+void audit_init(const char *log_dir);
 
 // 审计日志类型枚举
 typedef enum
@@ -23,5 +35,8 @@ typedef enum
 
 // 函数声明
 void audit_log(audit_type_t type, const char *fmt, ...);
+
+// 网络日志辅助函数
+void audit_network_addr(const struct sockaddr *addr, char *buf, size_t size);
 
 #endif // AUDIT_LOG_H
