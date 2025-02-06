@@ -34,7 +34,9 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           else
-            echo "tag=$(git describe --tags --abbrev=0)" >> $GITHUB_OUTPUT
+            # Try to get the latest tag, if fails use 'latest' as fallback
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "latest")
+            echo "tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
           fi
 
       - name: Build and push Docker image
@@ -42,6 +44,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.get_tag.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.get_tag.outputs.tag }}
