@@ -11,15 +11,12 @@ BUILD_DIR=build
 SRCS = hook_execve.c audit_log.c
 OBJS = $(SRCS:.c=.o)
 
-all: so server
+all: so 
 
 so: $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $(SRCS)
 	$(CC) $(CFLAGS) $(OBJS) -o $(BUILD_DIR)/$(TARGET) $(LDFLAGS)
 	rm -f *.o
-
-server: $(BUILD_DIR)
-	$(CC) $(CFLAGS) audit_server.c -o $(BUILD_DIR)/$(SERVER_TARGET)
 
 # 创建构建目录
 $(BUILD_DIR):
@@ -39,3 +36,10 @@ install:
 	@echo "Usage:"
 	@echo "1. Start audit server: audit_server /path/to/log/dir"
 	@echo "2. Run program with audit: LD_PRELOAD=/usr/lib/$(TARGET) your_program"
+
+build-docker: so
+	docker build . -t audit_alpine
+
+start-docker:
+	docker rm -f syscall-proxy-container
+	docker run -it --rm --name syscall-proxy-container -v $(shell pwd)/log:/var/log/syscall-proxy -p 8080:8080 audit_alpine:latest
