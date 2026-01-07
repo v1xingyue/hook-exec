@@ -3,11 +3,11 @@ name: Release Build
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g., v1.0.0)'
+        description: "Release tag (e.g., v1.0.0)"
         required: true
 
 env:
@@ -63,17 +63,17 @@ jobs:
           export CC=${{ matrix.platform.CC }}
           export CFLAGS="-Wall -fPIC -O2 -I./include"
           export LDFLAGS="-shared -ldl"
-          
+
           # Build object files
           $CC $CFLAGS -c src/hook_execve.c -o src/hook_execve.o
           $CC $CFLAGS -c src/audit_log.c -o src/audit_log.o
           $CC $CFLAGS -c src/hook_config.c -o src/hook_config.o
-          
+
           # Build shared library
           mkdir -p build
           $CC $CFLAGS src/hook_execve.o src/audit_log.o src/hook_config.o \
               -o build/hook_execve_${{ matrix.platform.name }}.so $LDFLAGS
-          
+
           # Verify the architecture
           file build/hook_execve_${{ matrix.platform.name }}.so
           echo "Built: build/hook_execve_${{ matrix.platform.name }}.so"
@@ -179,3 +179,13 @@ jobs:
         with:
           sarif_file: "trivy-results.sarif"
 
+      - name: Remove tag on failure
+        if: failure() && startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          echo "Removing tag: $TAG_NAME"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git tag -d "$TAG_NAME" || true
+          git push origin :refs/tags/"$TAG_NAME" || true
