@@ -20,10 +20,12 @@ typedef enum
 // 全局配置结构体
 typedef struct
 {
-    char log_dir[256];     // 审计日志目录
-    log_level_t log_level; // 日志级别
-    int console_output;    // 是否输出到控制台
-    int file_output;       // 是否输出到文件
+    char log_dir[256];        // 审计日志目录
+    log_level_t log_level;    // 日志级别
+    int console_output;       // 是否输出到控制台
+    int file_output;          // 是否输出到文件
+    int socket_output;        // 是否输出到 Unix Socket
+    char socket_path[256];    // Unix Socket 文件路径
 } audit_config_t;
 
 extern audit_config_t g_audit_config;

@@ -120,6 +120,15 @@ LD_PRELOAD=./build/hook_execve.so your_program
 
 通过环境变量可以灵活控制哪些系统调用需要被拦截。详细配置说明请参考 [config/README.md](config/README.md)。
 
+### 配置场景示例
+
+我们提供了几个常用的配置场景示例，包括：
+- 监控文件打开，日志同步输出到终端
+- 监控网络连接，日志写入到文件
+- 监控网络连接，日志发送到 Unix Socket
+
+详细配置步骤请参考 [config/scenarios.md](config/scenarios.md)。
+
 #### 快速配置示例
 
 **只监控文件操作和网络连接：**
@@ -200,7 +209,7 @@ LD_PRELOAD=./build/hook_execve.so your_program
 
 ### 配置输出目标
 
-控制是否输出到控制台或文件：
+控制是否输出到控制台、文件或 Unix Socket：
 
 ```bash
 # 启用控制台输出
@@ -208,6 +217,10 @@ export AUDIT_CONSOLE_OUTPUT=1
 
 # 禁用文件输出
 export AUDIT_FILE_OUTPUT=0
+
+# 启用 Socket 输出（需要指定 Socket 路径）
+export AUDIT_SOCKET_OUTPUT=1
+export AUDIT_SOCKET_PATH=/var/log/collect.sock
 
 LD_PRELOAD=./build/hook_execve.so your_program
 ```
@@ -358,6 +371,8 @@ docker run -it --rm \
 | `AUDIT_LOG_LEVEL` | 日志级别（NONE/ERROR/INFO/DEBUG） | `INFO` |
 | `AUDIT_CONSOLE_OUTPUT` | 是否输出到控制台（0/1） | `0`（关闭） |
 | `AUDIT_FILE_OUTPUT` | 是否输出到文件（0/1） | `1`（开启） |
+| `AUDIT_SOCKET_OUTPUT` | 是否输出到 Unix Socket（0/1） | `0`（关闭） |
+| `AUDIT_SOCKET_PATH` | Unix Socket 文件路径 | - |
 
 ### 拦截配置
 

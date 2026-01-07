@@ -6,6 +6,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
+#include <sys/un.h>
+#include <sys/socket.h>
 
 // 全局配置实例
 audit_config_t g_audit_config = {0};
@@ -39,6 +41,22 @@ static void get_config_from_env(void)
 
     const char *file_output = getenv("AUDIT_FILE_OUTPUT");
     g_audit_config.file_output = !file_output || strcmp(file_output, "0") != 0; // 默认开启文件输出
+
+    // 设置 Socket 输出
+    const char *socket_output = getenv("AUDIT_SOCKET_OUTPUT");
+    g_audit_config.socket_output = socket_output && strcmp(socket_output, "1") == 0;
+
+    // 设置 Socket 文件路径
+    const char *socket_path = getenv("AUDIT_SOCKET_PATH");
+    if (socket_path && g_audit_config.socket_output)
+    {
+        strncpy(g_audit_config.socket_path, socket_path, sizeof(g_audit_config.socket_path) - 1);
+        g_audit_config.socket_path[sizeof(g_audit_config.socket_path) - 1] = '\0';
+    }
+    else
+    {
+        g_audit_config.socket_path[0] = '\0';
+    }
 }
 
 // 输出调试信息
@@ -304,6 +322,72 @@ void audit_log(audit_type_t type, const char *fmt, ...)
 
         // 释放文件锁
         unlock_file(log_fd);
+    }
+
+    // 输出到 Unix Socket
+    if (g_audit_config.socket_output && g_audit_config.socket_path[0] != '\0')
+    {
+        static int socket_fd = -1;
+        static int socket_connected = 0;
+
+        // 如果 Socket 未连接，尝试连接
+        if (!socket_connected || socket_fd == -1)
+        {
+            // 关闭旧的连接
+            if (socket_fd != -1)
+            {
+                close(socket_fd);
+                socket_fd = -1;
+            }
+
+            // 创建 Unix Socket
+            socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+            if (socket_fd == -1)
+            {
+                // Socket 创建失败，静默失败（避免递归调用）
+                socket_connected = 0;
+            }
+            else
+            {
+                // 设置非阻塞模式
+                int flags = fcntl(socket_fd, F_GETFL, 0);
+                if (flags != -1)
+                {
+                    fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
+                }
+
+                // 连接到 Unix Socket
+                struct sockaddr_un addr;
+                memset(&addr, 0, sizeof(addr));
+                addr.sun_family = AF_UNIX;
+                strncpy(addr.sun_path, g_audit_config.socket_path, sizeof(addr.sun_path) - 1);
+
+                if (connect(socket_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0)
+                {
+                    socket_connected = 1;
+                }
+                else
+                {
+                    // 连接失败，关闭 Socket
+                    close(socket_fd);
+                    socket_fd = -1;
+                    socket_connected = 0;
+                }
+            }
+        }
+
+        // 如果已连接，尝试发送日志
+        if (socket_connected && socket_fd != -1)
+        {
+            ssize_t sent = send(socket_fd, log_buf, log_len, MSG_NOSIGNAL);
+            if (sent == -1)
+            {
+                // 发送失败，标记为未连接，下次重试
+                socket_connected = 0;
+                close(socket_fd);
+                socket_fd = -1;
+            }
+        }
     }
 
     in_audit = 0;
