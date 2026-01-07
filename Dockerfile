@@ -1,4 +1,4 @@
-FROM alpine:3.21.2 as builder
+FROM alpine:3.21.2 AS builder
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 RUN apk add --no-cache gcc g++ make cmake
 ADD . /app
