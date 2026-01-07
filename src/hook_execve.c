@@ -16,7 +16,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include "audit_log.h"
+#include "../include/audit_log.h"
+#include "../include/hook_config.h"
 
 // 定义原始函数的类型
 typedef int (*real_execve_t)(const char *pathname, char *const argv[], char *const envp[]);
@@ -243,7 +244,7 @@ ssize_t sendto(int sockfd, const void *buf, size_t len, int flags,
     ssize_t result = real_sendto(sockfd, buf, len, flags, dest_addr, addrlen);
 
     // 然后再进行日志记录
-    if (dest_addr && dest_addr->sa_family == AF_INET)
+    if (hook_config_is_enabled(HOOK_TYPE_DNS) && dest_addr && dest_addr->sa_family == AF_INET)
     {
         struct sockaddr_in *addr = (struct sockaddr_in *)dest_addr;
         char ip[INET_ADDRSTRLEN];
@@ -274,7 +275,7 @@ ssize_t recvfrom(int sockfd, void *buf, size_t len, int flags,
     ssize_t result = real_recvfrom(sockfd, buf, len, flags, src_addr, addrlen);
 
     // 然后再进行日志记录
-    if (result > 0 && src_addr && src_addr->sa_family == AF_INET)
+    if (hook_config_is_enabled(HOOK_TYPE_DNS) && result > 0 && src_addr && src_addr->sa_family == AF_INET)
     {
         struct sockaddr_in *addr = (struct sockaddr_in *)src_addr;
         char ip[INET_ADDRSTRLEN];
@@ -328,16 +329,18 @@ int execve(const char *pathname, char *const argv[], char *const envp[])
 {
     real_execve_t real_execve = (real_execve_t)dlsym(RTLD_NEXT, "execve");
 
-    // 构建参数字符串
-    char args_buf[4096] = "";
-    size_t total_len = 0;
-    for (int i = 0; argv[i] != NULL && total_len < sizeof(args_buf) - 100; i++)
-    {
-        total_len += snprintf(args_buf + total_len, sizeof(args_buf) - total_len,
-                              "\n        arg[%d]: %s", i, argv[i]);
-    }
+    if (hook_config_is_enabled(HOOK_TYPE_EXECVE)) {
+        // 构建参数字符串
+        char args_buf[4096] = "";
+        size_t total_len = 0;
+        for (int i = 0; argv[i] != NULL && total_len < sizeof(args_buf) - 100; i++)
+        {
+            total_len += snprintf(args_buf + total_len, sizeof(args_buf) - total_len,
+                                  "\n        arg[%d]: %s", i, argv[i]);
+        }
 
-    audit_log(AUDIT_EXEC, "Execute: %s%s", pathname, args_buf);
+        audit_log(AUDIT_EXEC, "Execute: %s%s", pathname, args_buf);
+    }
 
     return real_execve(pathname, argv, envp);
 }
@@ -358,17 +361,19 @@ int open(const char *pathname, int flags, ...)
 
     int fd = real_open(pathname, flags, mode);
 
-    audit_log(AUDIT_FILE,
-              "File open: %s\n"
-              "        Flags: %s%s%s%s\n"
-              "        Result: fd=%d",
-              pathname,
-              (flags & O_WRONLY) ? "WRONLY " : (flags & O_RDWR) ? "RDWR "
-                                                                : "RDONLY ",
-              (flags & O_CREAT) ? "CREAT " : "",
-              (flags & O_TRUNC) ? "TRUNC " : "",
-              (flags & O_APPEND) ? "APPEND " : "",
-              fd);
+    if (hook_config_is_enabled(HOOK_TYPE_FILE)) {
+        audit_log(AUDIT_FILE,
+                  "File open: %s\n"
+                  "        Flags: %s%s%s%s\n"
+                  "        Result: fd=%d",
+                  pathname,
+                  (flags & O_WRONLY) ? "WRONLY " : (flags & O_RDWR) ? "RDWR "
+                                                                      : "RDONLY ",
+                  (flags & O_CREAT) ? "CREAT " : "",
+                  (flags & O_TRUNC) ? "TRUNC " : "",
+                  (flags & O_APPEND) ? "APPEND " : "",
+                  fd);
+    }
 
     return fd;
 }
@@ -378,20 +383,22 @@ ssize_t write(int fd, const void *buf, size_t count)
 {
     real_write_t real_write = (real_write_t)dlsym(RTLD_NEXT, "write");
 
-    // 只记录普通文件的写操作
-    if (is_regular_file(fd))
-    {
-        char filepath[PATH_MAX];
-        get_fd_path(fd, filepath, sizeof(filepath));
-        ssize_t result = real_write(fd, buf, count);
+    if (hook_config_is_enabled(HOOK_TYPE_FILE)) {
+        // 只记录普通文件的写操作
+        if (!g_hook_config.filter_file_write || is_regular_file(fd))
+        {
+            char filepath[PATH_MAX];
+            get_fd_path(fd, filepath, sizeof(filepath));
+            ssize_t result = real_write(fd, buf, count);
 
-        audit_log(AUDIT_FILE, "File write:\n"
-                              "        File: %s (fd=%d)\n"
-                              "        Size: %zu bytes\n"
-                              "        Result: %zd",
-                  filepath, fd, count, result);
+            audit_log(AUDIT_FILE, "File write:\n"
+                                  "        File: %s (fd=%d)\n"
+                                  "        Size: %zu bytes\n"
+                                  "        Result: %zd",
+                      filepath, fd, count, result);
 
-        return result;
+            return result;
+        }
     }
 
     return real_write(fd, buf, count);
@@ -403,11 +410,13 @@ int unlink(const char *pathname)
     real_unlink_t real_unlink = (real_unlink_t)dlsym(RTLD_NEXT, "unlink");
     int result = real_unlink(pathname);
 
-    audit_log(AUDIT_FILE, "File delete:\n"
-                          "        Path: %s\n"
-                          "        Result: %s",
-              pathname,
-              result == 0 ? "success" : strerror(errno));
+    if (hook_config_is_enabled(HOOK_TYPE_FILE)) {
+        audit_log(AUDIT_FILE, "File delete:\n"
+                              "        Path: %s\n"
+                              "        Result: %s",
+                  pathname,
+                  result == 0 ? "success" : strerror(errno));
+    }
 
     return result;
 }
@@ -418,12 +427,14 @@ int rename(const char *oldpath, const char *newpath)
     real_rename_t real_rename = (real_rename_t)dlsym(RTLD_NEXT, "rename");
     int result = real_rename(oldpath, newpath);
 
-    audit_log(AUDIT_FILE, "File rename:\n"
-                          "        Old path: %s\n"
-                          "        New path: %s\n"
-                          "        Result: %s",
-              oldpath, newpath,
-              result == 0 ? "success" : strerror(errno));
+    if (hook_config_is_enabled(HOOK_TYPE_FILE)) {
+        audit_log(AUDIT_FILE, "File rename:\n"
+                              "        Old path: %s\n"
+                              "        New path: %s\n"
+                              "        Result: %s",
+                  oldpath, newpath,
+                  result == 0 ? "success" : strerror(errno));
+    }
 
     return result;
 }
@@ -434,10 +445,12 @@ pid_t fork(void)
     real_fork_t real_fork = (real_fork_t)dlsym(RTLD_NEXT, "fork");
     pid_t pid = real_fork();
 
-    audit_log(AUDIT_PROCESS, "Process fork:\n"
-                             "        Parent PID: %d\n"
-                             "        Child PID: %d",
-              getpid(), pid);
+    if (hook_config_is_enabled(HOOK_TYPE_PROCESS)) {
+        audit_log(AUDIT_PROCESS, "Process fork:\n"
+                                 "        Parent PID: %d\n"
+                                 "        Child PID: %d",
+                  getpid(), pid);
+    }
     return pid;
 }
 
@@ -445,10 +458,12 @@ __attribute__((noreturn)) void exit(int status)
 {
     real_exit_t real_exit = (real_exit_t)dlsym(RTLD_NEXT, "exit");
 
-    audit_log(AUDIT_PROCESS, "Process exit:\n"
-                             "        PID: %d\n"
-                             "        Status: %d",
-              getpid(), status);
+    if (hook_config_is_enabled(HOOK_TYPE_PROCESS)) {
+        audit_log(AUDIT_PROCESS, "Process exit:\n"
+                                 "        PID: %d\n"
+                                 "        Status: %d",
+                  getpid(), status);
+    }
 
     real_exit(status);
     __builtin_unreachable();
@@ -460,15 +475,17 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t offset)
     real_mmap_t real_mmap = (real_mmap_t)dlsym(RTLD_NEXT, "mmap");
     void *result = real_mmap(addr, len, prot, flags, fd, offset);
 
-    audit_log(AUDIT_MEMORY, "Memory map:\n"
-                            "        Size: %zu bytes\n"
-                            "        Protection: %s%s%s\n"
-                            "        Address: %p",
-              len,
-              (prot & PROT_READ) ? "READ " : "",
-              (prot & PROT_WRITE) ? "WRITE " : "",
-              (prot & PROT_EXEC) ? "EXEC" : "",
-              result);
+    if (hook_config_is_enabled(HOOK_TYPE_MEMORY)) {
+        audit_log(AUDIT_MEMORY, "Memory map:\n"
+                                "        Size: %zu bytes\n"
+                                "        Protection: %s%s%s\n"
+                                "        Address: %p",
+                  len,
+                  (prot & PROT_READ) ? "READ " : "",
+                  (prot & PROT_WRITE) ? "WRITE " : "",
+                  (prot & PROT_EXEC) ? "EXEC" : "",
+                  result);
+    }
     return result;
 }
 
@@ -478,12 +495,14 @@ int setuid(uid_t uid)
     real_setuid_t real_setuid = (real_setuid_t)dlsym(RTLD_NEXT, "setuid");
     int result = real_setuid(uid);
 
-    audit_log(AUDIT_SECURITY, "User ID change:\n"
-                              "        Old UID: %d\n"
-                              "        New UID: %d\n"
-                              "        Result: %s",
-              getuid(), uid,
-              result == 0 ? "success" : "failed");
+    if (hook_config_is_enabled(HOOK_TYPE_SECURITY)) {
+        audit_log(AUDIT_SECURITY, "User ID change:\n"
+                                  "        Old UID: %d\n"
+                                  "        New UID: %d\n"
+                                  "        Result: %s",
+                  getuid(), uid,
+                  result == 0 ? "success" : "failed");
+    }
     return result;
 }
 
@@ -492,12 +511,14 @@ int chmod(const char *path, mode_t mode)
     real_chmod_t real_chmod = (real_chmod_t)dlsym(RTLD_NEXT, "chmod");
     int result = real_chmod(path, mode);
 
-    audit_log(AUDIT_SECURITY, "File permission change:\n"
-                              "        Path: %s\n"
-                              "        Mode: %o\n"
-                              "        Result: %s",
-              path, mode,
-              result == 0 ? "success" : strerror(errno));
+    if (hook_config_is_enabled(HOOK_TYPE_SECURITY)) {
+        audit_log(AUDIT_SECURITY, "File permission change:\n"
+                                  "        Path: %s\n"
+                                  "        Mode: %o\n"
+                                  "        Result: %s",
+                  path, mode,
+                  result == 0 ? "success" : strerror(errno));
+    }
     return result;
 }
 
@@ -507,12 +528,14 @@ signal_handler_t signal(int signum, signal_handler_t handler)
     real_signal_t real_signal = (real_signal_t)dlsym(RTLD_NEXT, "signal");
     signal_handler_t result = real_signal(signum, handler);
 
-    audit_log(AUDIT_SIGNAL, "Signal handler change:\n"
-                            "        Signal: %d (%s)\n"
-                            "        Handler: %p",
-              signum,
-              strsignal(signum),
-              (void *)handler);
+    if (hook_config_is_enabled(HOOK_TYPE_SIGNAL)) {
+        audit_log(AUDIT_SIGNAL, "Signal handler change:\n"
+                                "        Signal: %d (%s)\n"
+                                "        Handler: %p",
+                  signum,
+                  strsignal(signum),
+                  (void *)handler);
+    }
     return result;
 }
 
@@ -521,9 +544,11 @@ int putenv(char *string)
 {
     real_putenv_t real_putenv = (real_putenv_t)dlsym(RTLD_NEXT, "putenv");
 
-    audit_log(AUDIT_ENV, "Environment change:\n"
-                         "        Change: %s",
-              string);
+    if (hook_config_is_enabled(HOOK_TYPE_ENV)) {
+        audit_log(AUDIT_ENV, "Environment change:\n"
+                             "        Change: %s",
+                  string);
+    }
     return real_putenv(string);
 }
 
@@ -533,19 +558,21 @@ struct hostent *gethostbyname(const char *name)
     real_gethostbyname_t real_gethostbyname = (real_gethostbyname_t)dlsym(RTLD_NEXT, "gethostbyname");
     struct hostent *result = real_gethostbyname(name);
 
-    char resolved[1024] = "";
-    if (result != NULL && result->h_addr_list != NULL)
-    {
-        struct in_addr addr;
-        memcpy(&addr, result->h_addr_list[0], sizeof(struct in_addr));
-        snprintf(resolved, sizeof(resolved), " -> %s", inet_ntoa(addr));
-    }
+    if (hook_config_is_enabled(HOOK_TYPE_DNS)) {
+        char resolved[1024] = "";
+        if (result != NULL && result->h_addr_list != NULL)
+        {
+            struct in_addr addr;
+            memcpy(&addr, result->h_addr_list[0], sizeof(struct in_addr));
+            snprintf(resolved, sizeof(resolved), " -> %s", inet_ntoa(addr));
+        }
 
-    audit_log(AUDIT_DNS, "DNS Query (gethostbyname):\n"
-                         "        Host: %s%s\n"
-                         "        Result: %s",
-              name, resolved,
-              result != NULL ? "success" : "failed");
+        audit_log(AUDIT_DNS, "DNS Query (gethostbyname):\n"
+                             "        Host: %s%s\n"
+                             "        Result: %s",
+                  name, resolved,
+                  result != NULL ? "success" : "failed");
+    }
 
     return result;
 }
@@ -558,25 +585,27 @@ int getaddrinfo(const char *node, const char *service,
     real_getaddrinfo_t real_getaddrinfo = (real_getaddrinfo_t)dlsym(RTLD_NEXT, "getaddrinfo");
     int result = real_getaddrinfo(node, service, hints, res);
 
-    char resolved[1024] = "";
-    if (result == 0 && res != NULL && *res != NULL)
-    {
-        char host[NI_MAXHOST];
-        if (getnameinfo((*res)->ai_addr, (*res)->ai_addrlen,
-                        host, sizeof(host), NULL, 0, NI_NUMERICHOST) == 0)
+    if (hook_config_is_enabled(HOOK_TYPE_DNS)) {
+        char resolved[1024] = "";
+        if (result == 0 && res != NULL && *res != NULL)
         {
-            snprintf(resolved, sizeof(resolved), " -> %s", host);
+            char host[NI_MAXHOST];
+            if (getnameinfo((*res)->ai_addr, (*res)->ai_addrlen,
+                            host, sizeof(host), NULL, 0, NI_NUMERICHOST) == 0)
+            {
+                snprintf(resolved, sizeof(resolved), " -> %s", host);
+            }
         }
-    }
 
-    audit_log(AUDIT_DNS, "DNS Query (getaddrinfo):\n"
-                         "        Host: %s\n"
-                         "        Service: %s%s\n"
-                         "        Result: %s",
-              node ? node : "NULL",
-              service ? service : "NULL",
-              resolved,
-              result == 0 ? "success" : gai_strerror(result));
+        audit_log(AUDIT_DNS, "DNS Query (getaddrinfo):\n"
+                             "        Host: %s\n"
+                             "        Service: %s%s\n"
+                             "        Result: %s",
+                  node ? node : "NULL",
+                  service ? service : "NULL",
+                  resolved,
+                  result == 0 ? "success" : gai_strerror(result));
+    }
 
     return result;
 }
@@ -586,31 +615,22 @@ int connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 {
     real_connect_t real_connect = (real_connect_t)dlsym(RTLD_NEXT, "connect");
 
-    // 添加调试信息
-    audit_log(AUDIT_CONNECT, "Connect function called:\n"
-                             "        Socket: %d\n"
-                             "        Address family: %d",
-              sockfd,
-              addr ? addr->sa_family : -1);
-
-    char remote_addr[256];
-    format_socket_address(addr, remote_addr, sizeof(remote_addr));
-
-    audit_log(AUDIT_CONNECT, "Connection attempt:\n"
-                             "        Socket: %d\n"
-                             "        Remote address: %s\n"
-                             "        Address length: %d",
-              sockfd, remote_addr, addrlen);
-
     int result = real_connect(sockfd, addr, addrlen);
 
-    audit_log(AUDIT_CONNECT, "Connection result:\n"
-                             "        Socket: %d\n"
-                             "        Result: %s\n"
-                             "        Error: %s",
-              sockfd,
-              result == 0 ? "success" : "failed",
-              result == 0 ? "none" : strerror(errno));
+    if (hook_config_is_enabled(HOOK_TYPE_NETWORK)) {
+        char remote_addr[256];
+        format_socket_address(addr, remote_addr, sizeof(remote_addr));
+
+        audit_log(AUDIT_CONNECT, "Connection attempt:\n"
+                                 "        Socket: %d\n"
+                                 "        Remote address: %s\n"
+                                 "        Address length: %d\n"
+                                 "        Result: %s\n"
+                                 "        Error: %s",
+                  sockfd, remote_addr, addrlen,
+                  result == 0 ? "success" : "failed",
+                  result == 0 ? "none" : strerror(errno));
+    }
 
     return result;
 }
@@ -620,22 +640,26 @@ int listen(int sockfd, int backlog)
 {
     real_listen_t real_listen = (real_listen_t)dlsym(RTLD_NEXT, "listen");
 
-    struct sockaddr_storage addr;
-    socklen_t addr_len = sizeof(addr);
-    char local_addr[256] = "unknown";
+    int result = real_listen(sockfd, backlog);
 
-    if (getsockname(sockfd, (struct sockaddr *)&addr, &addr_len) == 0)
-    {
-        format_socket_address((struct sockaddr *)&addr, local_addr, sizeof(local_addr));
+    if (hook_config_is_enabled(HOOK_TYPE_NETWORK)) {
+        struct sockaddr_storage addr;
+        socklen_t addr_len = sizeof(addr);
+        char local_addr[256] = "unknown";
+
+        if (getsockname(sockfd, (struct sockaddr *)&addr, &addr_len) == 0)
+        {
+            format_socket_address((struct sockaddr *)&addr, local_addr, sizeof(local_addr));
+        }
+
+        audit_log(AUDIT_LISTEN, "Listen request:\n"
+                                "        Socket: %d\n"
+                                "        Local address: %s\n"
+                                "        Backlog: %d",
+                  sockfd, local_addr, backlog);
     }
 
-    audit_log(AUDIT_LISTEN, "Listen request:\n"
-                            "        Socket: %d\n"
-                            "        Local address: %s\n"
-                            "        Backlog: %d",
-              sockfd, local_addr, backlog);
-
-    return real_listen(sockfd, backlog);
+    return result;
 }
 
 // 初始化函数，在动态库加载时自动执行
@@ -646,6 +670,10 @@ __attribute__((constructor)) static void init_syscall_proxy(void)
         return;
     initialized = 1;
 
+    // 初始化拦截配置
+    hook_config_init();
+
+    // 初始化审计日志
     const char *log_dir = getenv("SYSCALL_PROXY_LOG_DIR");
     if (!log_dir)
     {
@@ -653,27 +681,7 @@ __attribute__((constructor)) static void init_syscall_proxy(void)
     }
 
     audit_init(log_dir);
-    printf("Your process will be audited! Log directory: %s\n", g_audit_config.log_dir);
+    printf("Hook Execve initialized! Log directory: %s\n", g_audit_config.log_dir);
     fflush(stdout);
 }
 
-static const char *get_dns_type_name(uint16_t type)
-{
-    switch (type)
-    {
-    case DNS_TYPE_A:
-        return "A";
-    case DNS_TYPE_NS:
-        return "NS";
-    case DNS_TYPE_CNAME:
-        return "CNAME";
-    case DNS_TYPE_SOA:
-        return "SOA";
-    case DNS_TYPE_TYPE9:
-        return "NSEC3PARAM";
-    case DNS_TYPE_PTR:
-        return "PTR";
-    default:
-        return "UNKNOWN";
-    }
-}

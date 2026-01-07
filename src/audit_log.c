@@ -1,4 +1,4 @@
-#include "audit_log.h"
+#include "../include/audit_log.h"
 #include <stdarg.h>
 #include <sys/stat.h>
 #include <errno.h>
